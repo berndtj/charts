@@ -1,0 +1,55 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: {{ template "fullname" . }}
+  labels:
+    chart: "{{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}"
+spec:
+  replicas: {{ .Values.replicaCount }}
+  template:
+    metadata:
+      labels:
+        app: {{ template "fullname" . }}
+
+    spec:
+      volumes:
+      - name: nginx-logs
+        emptyDir: {}
+      - name: nginx-config
+        configMap:
+          name: {{ template "fullname" . }}-nginx-conf
+      - name: logstash-config
+        configMap:
+          name: {{ template "fullname" . }}-logstash-conf
+
+      containers:
+      - name: {{ .Chart.Name }}-logstash
+        image: logstash
+        command: ["logstash"]
+        args: ["-f", "/etc/logstash/nginx/nginx-logstash.conf"]
+        volumeMounts:
+        - name: nginx-logs
+          mountPath: /var/log/nginx
+        - name: logstash-config
+          mountPath: /etc/logstash/nginx
+
+      - name: {{ .Chart.Name }}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        volumeMounts:
+        - name: nginx-logs
+          mountPath: /var/log/nginx
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d
+        ports:
+        - containerPort: {{ .Values.service.internalPort }}
+        #livenessProbe:
+          #httpGet:
+            #path: /
+            #port: {{ .Values.service.internalPort }}
+        #readinessProbe:
+          #httpGet:
+            #path: /
+            #port: {{ .Values.service.internalPort }}
+        resources:
+{{ toYaml .Values.resources | indent 10 }}

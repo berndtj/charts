@@ -1,0 +1,70 @@
+apiVersion: v1
+data:
+  nginx-logstash.conf: |
+    input {
+      file { path => "/var/log/nginx/access_nginx.log" }
+    }
+
+
+    filter {
+      grok {
+        match => [ "message" , "%{COMBINEDAPACHELOG} %{NUMBER:requesttime} %{NUMBER:upstreamtime}+%{GREEDYDATA:extra_fields}"]
+        overwrite => [ "message" ]
+      }
+
+      mutate {
+        convert => ["response", "integer"]
+        convert => ["bytes", "integer"]
+        convert => ["requesttime", "float"]
+        convert => ["upstreamtime", "float"]
+      }
+
+      geoip {
+        source => "clientip"
+        target => "geoip"
+        add_tag => [ "nginx-geoip" ]
+      }
+
+      date {
+        match => [ "timestamp" , "dd/MMM/YYYY:HH:mm:ss Z" ]
+        remove_field => [ "timestamp" ]
+      }
+
+      useragent {
+        source => "agent"
+      }
+    }
+
+    output {
+      elasticsearch { hosts => ["{{ .Values.el.host }}:{{ .Values.el.port }}"] }
+      stdout { codec => rubydebug }
+    }
+kind: ConfigMap
+metadata:
+  name: {{ template "fullname" . }}-logstash-conf
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ template "fullname" . }}-nginx-conf
+data:
+  nginx-logstash.conf: |
+    log_format compression '$realip - $remote_user [$time_local] '
+                           '"$request" $status $bytes_sent '
+                           '"$http_referer" "$http_user_agent" '
+                           '$request_time $upstream_response_time $pipe';
+    access_log /var/log/nginx/access_nginx.log compression;
+    upstream backend {
+      server {{ .Values.backend }};
+    }
+
+    server {
+      set $realip $remote_addr;
+      if ($http_x_forwarded_for ~ "^(\d+\.\d+\.\d+\.\d+)") {
+        set $realip $1;
+      }
+      location / {
+        proxy_pass http://backend;
+      }
+    }
+
